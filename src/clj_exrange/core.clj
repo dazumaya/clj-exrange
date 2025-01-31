@@ -4,20 +4,20 @@
 
 (defn- parse-range
   [s]
-  (let [[_ d1 _ d2 :as all] (re-find #"^(\d+)(-(\d+))?$" s)]
-    (cond
-      (nil? all) (throw (IllegalArgumentException. s))
-      (nil? d2) (list d1)
-      :else (let [c1 (count d1)
-                  c2 (count d2)
-                  i1 (Integer/parseInt d1)
-                  i2 (Integer/parseInt d2)
-                  fmt (if (= c1 c2)
-                        (format "%%0%dd" c1)
-                        "%d")
-                  step (if (< i1 i2) 1 -1)]
-              (map #(format fmt %)
-                   (range i1 (+ i2 step) step))))))
+  (if-let [[_ d1 _ d2] (re-find #"^(\d+)(-(\d+))?$" s)]
+    (if d2
+      (let [c1 (count d1)
+            c2 (count d2)
+            i1 (Integer/parseInt d1)
+            i2 (Integer/parseInt d2)
+            fmt (if (= c1 c2)
+                  (format "%%0%dd" c1)
+                  "%d")
+            step (if (< i1 i2) 1 -1)]
+        (map #(format fmt %)
+             (range i1 (+ i2 step) step)))
+      (list d1))
+    (throw (IllegalArgumentException. s))))
 
 (defn- brackets-stack
   [coll ch]
@@ -31,10 +31,8 @@
 (defn- parse-comma
   [s]
   (->> (subs s 1 (dec (count s)))
-       (seq)
-       (reduce (fn [coll ch]
-                 (let [[xs ss st] coll
-                       stack (brackets-stack st ch)]
+       (reduce (fn [[xs ss st] ch]
+                 (let [stack (brackets-stack st ch)]
                    (if (and (= ch \,) (empty? stack))
                      [(conj xs ss) "" stack]
                      [xs (str ss ch) stack])))
@@ -59,7 +57,7 @@
        (reduce (fn [coll ch]
                  (let [[i st] coll
                        stack (brackets-stack st ch)]
-                   (if-not (seq stack)
+                   (if (empty? stack)
                      (reduced coll)
                      [(inc i) stack])))
                [0 []])
@@ -78,19 +76,18 @@
 (defn- parse
   [head tail]
   (let [token {:ex head :tokens []}]
-    (if-not (seq tail)
+    (if (empty? tail)
       token
       (let [[_ h t :as all] (re-find #"(.*?)([\[\{].*)" tail)]
         (cond
-          (nil? all) (update token :tokens #(conj % (parse tail "")))
-          (not-empty h) (update token :tokens #(conj % (parse h t)))
-          :else (update token :tokens #(into % (glob t))))))))
+          (nil? all) (update token :tokens conj (parse tail ""))
+          (seq h) (update token :tokens conj (parse h t))
+          :else (update token :tokens into (glob t)))))))
 
 (defn- expand
-  [xs s token]
-  (let [tokens (:tokens token)
-        nstr (str s (:ex token))]
-    (if-not (seq tokens)
+  [xs s {:keys [ex tokens]}]
+  (let [nstr (str s ex)]
+    (if (empty? tokens)
       (conj xs nstr)
       (reduce #(expand %1 nstr %2) xs tokens))))
 
